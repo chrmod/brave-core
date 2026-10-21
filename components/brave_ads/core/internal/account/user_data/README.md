@@ -15,6 +15,7 @@ Included as part of the "confirmation" payload. See [non-Brave Rewards user conf
 |---|---|---|
 | buildChannel  | {"buildChannel": "beta"}  | Browser build channel.  |
 | conversion.action[^2]  | {"conversion":[{"action":"click"}]}  | Conversion attribution to determine which advertising efforts led a user to view or click on an ad and subsequently complete a desired action. Also, see [reporting metrics](https://ads-help.brave.com/campaign-performance/reporting/#available-reporting-metrics-in-brave-ads-manager).<br><br> Supported types:<br><br>Brave Search ads:<br>- click-through  |
+| conversion.basket[^2]  | {"conversion":[{"action":"click","basket":{"value":59.9,"currency":"EUR"}}]}  | Basket amount and ISO 4217 currency read from the conversion page, using the selectors the advertiser configured for the Brave Search ad. Only included when the amount could be read; the currency is omitted if unknown. Never includes an order identifier.  |
 | countryCode  | {"countryCode":"US"}  | Two-letter [ISO 3166-1 alpha-2](https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2) country code representing the user's current country, determined by IP geolocation.  |
 | platform  | {"platform":"windows"}  | Operating system.  |
 | versionNumber  | {"versionNumber":"1.2.0.0"}  | Browser version number with fixed values for build and patch.  |

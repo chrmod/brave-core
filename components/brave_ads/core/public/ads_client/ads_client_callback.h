@@ -37,6 +37,9 @@ using UrlRequestCallback =
 using GetSiteHistoryCallback =
     base::OnceCallback<void(const SiteHistoryList& site_history)>;
 
+using ExtractConversionBasketCallback =
+    base::OnceCallback<void(mojom::ConversionBasketFieldsInfoPtr mojom_fields)>;
+
 using GetScheduledCaptchaCallback =
     base::OnceCallback<void(const std::string& captcha_id)>;
 

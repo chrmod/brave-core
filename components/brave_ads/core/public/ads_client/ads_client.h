@@ -6,6 +6,7 @@
 #ifndef BRAVE_COMPONENTS_BRAVE_ADS_CORE_PUBLIC_ADS_CLIENT_ADS_CLIENT_H_
 #define BRAVE_COMPONENTS_BRAVE_ADS_CORE_PUBLIC_ADS_CLIENT_ADS_CLIENT_H_
 
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -15,6 +16,8 @@
 #include "brave/components/brave_ads/core/public/ads_client/ads_client_callback.h"
 
 static_assert(BUILDFLAG(ENABLE_BRAVE_ADS));
+
+class GURL;
 
 namespace brave_ads {
 
@@ -63,6 +66,16 @@ class AdsClient {
                               int recent_day_range,
                               GetSiteHistoryCallback callback) = 0;
 
+  // Read the basket fields described by `mojom_rules` from the page for `url`
+  // loaded in the main frame of the tab for the specified `tab_id`. The
+  // callback takes one argument - the raw strings read, or `nullptr` if the
+  // tab was not found or no longer shows `url`.
+  virtual void ExtractConversionBasket(
+      int32_t tab_id,
+      const GURL& url,
+      mojom::ConversionBasketRulesInfoPtr mojom_rules,
+      ExtractConversionBasketCallback callback) = 0;
+
   // Fetch and return data for the `mojom_url_request`. Loading should be
   // performed asynchronously, so that the app remains responsive and should
   // handle incoming data or errors as they arrive. The callback takes one
@@ -92,9 +105,10 @@ class AdsClient {
   // if no resource with this `id` and `version` exists on this device
   // (regardless of which, if any, component is installed), as opposed to
   // an existing resource failing to open.
-  virtual void LoadResourceComponent(const std::string& id,
-                                     int version,
-                                     LoadResourceComponentCallback callback) = 0;
+  virtual void LoadResourceComponent(
+      const std::string& id,
+      int version,
+      LoadResourceComponentCallback callback) = 0;
 
   // Show a notification indicating that a scheduled captcha with the given
   // `captcha_id` must be solved for the given `payment_id` before the user can

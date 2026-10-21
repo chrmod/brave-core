@@ -54,6 +54,14 @@ class AdsService : public KeyedService {
     virtual void OpenNewTabWithUrl(const GURL& url) = 0;
     virtual bool IsFullScreenMode() = 0;
     virtual std::string GetVariationsCountryCode() = 0;
+    // Runs `callback` with the basket fields read from the page for `url` in
+    // the tab for `tab_id`, or `nullptr` if they could not be read.
+    virtual void ExtractConversionBasket(
+        int32_t tab_id,
+        const GURL& url,
+        mojom::ConversionBasketRulesInfoPtr mojom_rules,
+        base::OnceCallback<void(mojom::ConversionBasketFieldsInfoPtr)>
+            callback) = 0;
   };
 
   explicit AdsService(std::unique_ptr<Delegate> delegate);

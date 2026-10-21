@@ -11,6 +11,7 @@
 #include "brave/components/brave_ads/core/internal/user_engagement/ad_events/ad_event_builder.h"
 #include "brave/components/brave_ads/core/internal/user_engagement/ad_events/ad_event_info.h"
 #include "brave/components/brave_ads/core/internal/user_engagement/conversions/actions/conversion_action_types.h"
+#include "brave/components/brave_ads/core/internal/user_engagement/conversions/basket/conversion_basket_info.h"
 #include "brave/components/brave_ads/core/internal/user_engagement/conversions/conversion/conversion_info.h"
 #include "brave/components/brave_ads/core/mojom/brave_ads.mojom.h"
 #include "brave/components/brave_ads/core/public/ad_units/ad_info.h"
@@ -30,14 +31,30 @@ TEST(BraveAdsConversionBuilderTest, BuildConversion) {
                    /*created_at=*/test::Now());
 
   // Act
-  const ConversionInfo conversion = BuildConversion(ad_event);
+  const ConversionInfo conversion = BuildConversion(ad_event, /*basket=*/{});
 
   // Assert
   EXPECT_THAT(conversion,
               ::testing::FieldsAre(
                   mojom::AdType::kNotificationAd, test::kCreativeInstanceId,
                   test::kCreativeSetId, test::kCampaignId, test::kAdvertiserId,
-                  test::kSegment, ConversionActionType::kViewThrough));
+                  test::kSegment, ConversionActionType::kViewThrough,
+                  ConversionBasketInfo{}));
+}
+
+TEST(BraveAdsConversionBuilderTest, BuildConversionWithBasket) {
+  // Arrange
+  const AdInfo ad = test::BuildAd(mojom::AdType::kSearchResultAd,
+                                  /*use_random_uuids=*/false);
+  const AdEventInfo ad_event = BuildAdEvent(
+      ad, mojom::ConfirmationType::kClicked, /*created_at=*/test::Now());
+  const ConversionBasketInfo basket{.value = 59.9, .currency = "EUR"};
+
+  // Act
+  const ConversionInfo conversion = BuildConversion(ad_event, basket);
+
+  // Assert
+  EXPECT_EQ(basket, conversion.basket);
 }
 
 }  // namespace brave_ads

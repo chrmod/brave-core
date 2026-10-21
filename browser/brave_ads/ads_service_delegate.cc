@@ -5,16 +5,21 @@
 
 #include "brave/browser/brave_ads/ads_service_delegate.h"
 
+#include <utility>
+
 #include "base/strings/string_util.h"
 #include "base/types/to_address.h"
 #include "brave/browser/brave_ads/application_state/notification_helper/notification_helper.h"
+#include "brave/browser/brave_ads/tabs/ads_tab_helper.h"
 #include "brave/components/brave_adaptive_captcha/brave_adaptive_captcha_service.h"
+#include "brave/components/brave_ads/core/mojom/brave_ads.mojom.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/notifications/notification_display_service.h"
 #include "chrome/browser/notifications/notification_display_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/prefs/pref_service.h"
+#include "components/sessions/core/session_id.h"
 #include "components/variations/service/variations_service.h"
 #include "components/variations/service/variations_service_utils.h"
 #include "ui/message_center/public/cpp/notification.h"
@@ -171,6 +176,21 @@ bool AdsServiceDelegate::IsFullScreenMode() {
 #else
   return true;
 #endif
+}
+
+void AdsServiceDelegate::ExtractConversionBasket(
+    int32_t tab_id,
+    const GURL& url,
+    mojom::ConversionBasketRulesInfoPtr mojom_rules,
+    base::OnceCallback<void(mojom::ConversionBasketFieldsInfoPtr)> callback) {
+  AdsTabHelper* const ads_tab_helper =
+      AdsTabHelper::FromSessionId(SessionID::FromSerializedValue(tab_id));
+  if (!ads_tab_helper) {
+    return std::move(callback).Run(/*mojom_fields=*/nullptr);
+  }
+
+  ads_tab_helper->ExtractConversionBasket(url, std::move(mojom_rules),
+                                          std::move(callback));
 }
 
 std::string AdsServiceDelegate::GetVariationsCountryCode() {

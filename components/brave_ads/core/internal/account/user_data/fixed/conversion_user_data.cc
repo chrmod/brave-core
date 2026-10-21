@@ -5,6 +5,8 @@
 
 #include "brave/components/brave_ads/core/internal/account/user_data/fixed/conversion_user_data.h"
 
+#include <optional>
+#include <utility>
 
 #include "brave/components/brave_ads/core/internal/account/user_data/fixed/conversion_user_data_constants.h"
 #include "brave/components/brave_ads/core/internal/account/user_data/fixed/conversion_user_data_util.h"
@@ -16,7 +18,13 @@ base::DictValue BuildConversionUserData(const ConversionInfo& conversion) {
   base::ListValue list;
 
   // Conversion.
-  list.Append(BuildConversionActionTypeUserData(conversion));
+  base::DictValue conversion_dict =
+      BuildConversionActionTypeUserData(conversion);
+  if (std::optional<base::DictValue> basket_dict =
+          BuildConversionBasketUserData(conversion)) {
+    conversion_dict.Set(kConversionBasketKey, std::move(*basket_dict));
+  }
+  list.Append(std::move(conversion_dict));
 
   return base::DictValue().Set(kConversionKey, std::move(list));
 }

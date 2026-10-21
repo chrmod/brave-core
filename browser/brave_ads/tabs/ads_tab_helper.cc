@@ -5,10 +5,23 @@
 
 #include "brave/browser/brave_ads/tabs/ads_tab_helper.h"
 
+#include <array>
+#include <string>
+#include <string_view>
+#include <utility>
+
 #include "base/check.h"
 #include "base/check_is_test.h"
+#include "base/json/json_writer.h"
+#include "base/no_destructor.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "brave/browser/brave_ads/ads_service_factory.h"
 #include "brave/components/brave_ads/core/browser/service/ads_service.h"
+#include "brave/components/brave_ads/core/mojom/brave_ads.mojom.h"
 #include "brave/components/brave_ads/core/public/prefs/pref_names.h"
 #include "brave/components/brave_rewards/core/pref_names.h"
 #include "chrome/browser/profiles/profile.h"
@@ -24,12 +37,25 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "ui/base/page_transition_types.h"
+#include "url/gurl.h"
 
 #if !BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #endif
 
 namespace brave_ads {
+
+struct ConversionBasketExtraction {
+  GURL url;
+  mojom::ConversionBasketRulesInfoPtr mojom_rules;
+  ExtractConversionBasketCallback callback;
+  mojom::ConversionBasketFieldsInfoPtr mojom_fields =
+      mojom::ConversionBasketFieldsInfo::New();
+  bool did_start = false;
+  size_t retry_count = 0;
+  base::OneShotTimer retry_timer;
+  base::OneShotTimer timeout_timer;
+};
 
 namespace {
 
@@ -38,6 +64,117 @@ constexpr int kHttpServerErrorResponseStatusCodeClass = 5;
 
 constexpr char16_t kDocumentBodyInnerTextJavaScript[] =
     u"document?.body?.innerText";
+
+// Bounds how long a conversion waits for its basket fields, including waiting
+// for the page to load.
+constexpr base::TimeDelta kConversionBasketExtractionTimeout =
+    base::Seconds(15);
+
+// Intervals between attempts while a configured field is missing, i.e., retry
+// 1, 3 and 8 seconds after the first attempt for pages that render the basket
+// after load.
+constexpr auto kConversionBasketExtractionRetryDelays =
+    std::to_array<base::TimeDelta>(
+        {base::Seconds(1), base::Seconds(2), base::Seconds(5)});
+
+// Maximum length of a basket field, in UTF-16 code units.
+constexpr size_t kMaxConversionBasketFieldLength = 64;
+
+// Reads at most one node per field, by selector, and returns only strings.
+// `$1` is the JSON encoded rules and `$2` is the maximum field length.
+constexpr char kConversionBasketExtractionJavaScript[] = R"JS(
+(() => {
+  const rules = $1;
+  const read = (rule) => {
+    if (!rule) {
+      return null;
+    }
+    let node;
+    try {
+      node = document.querySelector(rule.selector);
+    } catch {
+      return null;
+    }
+    if (!node) {
+      return null;
+    }
+    const raw =
+        rule.attribute ? node.getAttribute(rule.attribute) : node.textContent;
+    return raw === null ? null : raw.trim().slice(0, $2);
+  };
+  return {value: read(rules.value), currency: read(rules.currency)};
+})()
+)JS";
+
+base::flat_map</*session_id*/ int32_t, raw_ptr<AdsTabHelper>>& AdsTabHelpers() {
+  static base::NoDestructor<
+      base::flat_map</*session_id*/ int32_t, raw_ptr<AdsTabHelper>>>
+      ads_tab_helpers;
+  return *ads_tab_helpers;
+}
+
+// Another tab helper may have taken over the session id, so only remove
+// `ads_tab_helper`.
+void MaybeRemoveAdsTabHelper(SessionID session_id,
+                             const AdsTabHelper* const ads_tab_helper) {
+  auto& ads_tab_helpers = AdsTabHelpers();
+  const auto iter = ads_tab_helpers.find(session_id.id());
+  if (iter != ads_tab_helpers.cend() && iter->second == ads_tab_helper) {
+    ads_tab_helpers.erase(iter);
+  }
+}
+
+base::DictValue ConversionBasketFieldRuleToDict(
+    const mojom::ConversionBasketFieldRuleInfo& mojom_rule) {
+  base::DictValue dict;
+  dict.Set("selector", mojom_rule.selector);
+  if (mojom_rule.attribute) {
+    dict.Set("attribute", *mojom_rule.attribute);
+  }
+  return dict;
+}
+
+std::u16string BuildConversionBasketExtractionJavaScript(
+    const mojom::ConversionBasketRulesInfo& mojom_rules) {
+  base::DictValue dict;
+  if (mojom_rules.value) {
+    dict.Set("value", ConversionBasketFieldRuleToDict(*mojom_rules.value));
+  }
+  if (mojom_rules.currency) {
+    dict.Set("currency",
+             ConversionBasketFieldRuleToDict(*mojom_rules.currency));
+  }
+
+  // The rules come from the ad, never from the page, and are JSON encoded so
+  // that they are passed to the script as data.
+  const std::string json = base::WriteJson(dict).value_or("{}");
+
+  return base::UTF8ToUTF16(base::ReplaceStringPlaceholders(
+      kConversionBasketExtractionJavaScript,
+      {json, base::NumberToString(kMaxConversionBasketFieldLength)},
+      /*offsets=*/nullptr));
+}
+
+// Returns the field only if it is a non-empty string within the length limit,
+// as the renderer is not trusted to enforce it.
+std::optional<std::string> MaybeGetConversionBasketField(
+    const base::DictValue& dict,
+    std::string_view key) {
+  const std::string* const field = dict.FindString(key);
+  if (!field || field->empty() ||
+      base::UTF8ToUTF16(*field).size() > kMaxConversionBasketFieldLength) {
+    return std::nullopt;
+  }
+
+  return *field;
+}
+
+bool HasAllConversionBasketFields(
+    const ConversionBasketExtraction& extraction) {
+  return (!extraction.mojom_rules->value || extraction.mojom_fields->value) &&
+         (!extraction.mojom_rules->currency ||
+          extraction.mojom_fields->currency);
+}
 
 // Returns 'false' if the navigation was a back/forward navigation or a reload,
 // otherwise 'true'.
@@ -85,7 +222,11 @@ AdsTabHelper::AdsTabHelper(tabs::TabInterface& tab)
 
 // TabFeatures, and so this helper, are destroyed before the tab's contents.
 AdsTabHelper::~AdsTabHelper() {
+  FinishConversionBasketExtractions();
+
   MaybeNotifyTabdidClose();
+
+  MaybeRemoveAdsTabHelper(session_id_, this);
 }
 
 void AdsTabHelper::SetAdsServiceForTesting(AdsService* const ads_service) {
@@ -99,6 +240,8 @@ void AdsTabHelper::Initialize() {
   if (!session_id_.is_valid()) {
     return;
   }
+
+  AdsTabHelpers()[session_id_.id()] = this;
 
   Profile* const profile =
       Profile::FromBrowserContext(web_contents()->GetBrowserContext());
@@ -116,6 +259,41 @@ void AdsTabHelper::Initialize() {
   MaybeSetBrowserIsActive();
 
   OnVisibilityChanged(web_contents()->GetVisibility());
+}
+
+// static
+AdsTabHelper* AdsTabHelper::FromSessionId(SessionID session_id) {
+  const auto& ads_tab_helpers = AdsTabHelpers();
+  const auto iter = ads_tab_helpers.find(session_id.id());
+  return iter != ads_tab_helpers.cend() ? iter->second.get() : nullptr;
+}
+
+void AdsTabHelper::ExtractConversionBasket(
+    const GURL& url,
+    mojom::ConversionBasketRulesInfoPtr mojom_rules,
+    ExtractConversionBasketCallback callback) {
+  CHECK(mojom_rules);
+
+  if (web_contents()->GetLastCommittedURL() != url) {
+    // The tab navigated away from the conversion page.
+    return std::move(callback).Run(/*mojom_fields=*/nullptr);
+  }
+
+  const int32_t id = next_conversion_basket_extraction_id_++;
+
+  auto extraction = std::make_unique<ConversionBasketExtraction>();
+  extraction->url = url;
+  extraction->mojom_rules = std::move(mojom_rules);
+  extraction->callback = std::move(callback);
+  extraction->timeout_timer.Start(
+      FROM_HERE, kConversionBasketExtractionTimeout,
+      base::BindOnce(&AdsTabHelper::FinishConversionBasketExtraction,
+                     weak_factory_.GetWeakPtr(), id));
+  conversion_basket_extractions_[id] = std::move(extraction);
+
+  if (web_contents()->IsDocumentOnLoadCompletedInPrimaryMainFrame()) {
+    RunConversionBasketExtraction(id);
+  }
 }
 
 bool AdsTabHelper::IsNotificationAdsEnabled() const {
@@ -287,6 +465,95 @@ void AdsTabHelper::OnMaybeNotifyTabTextContentDidChange(
   }
 }
 
+void AdsTabHelper::MaybeRunConversionBasketExtractions() {
+  std::vector<int32_t> ids;
+  for (const auto& [id, extraction] : conversion_basket_extractions_) {
+    if (!extraction->did_start) {
+      ids.push_back(id);
+    }
+  }
+
+  for (const int32_t id : ids) {
+    RunConversionBasketExtraction(id);
+  }
+}
+
+void AdsTabHelper::RunConversionBasketExtraction(int32_t id) {
+  const auto iter = conversion_basket_extractions_.find(id);
+  if (iter == conversion_basket_extractions_.cend()) {
+    return;
+  }
+  ConversionBasketExtraction& extraction = *iter->second;
+
+  if (web_contents()->GetLastCommittedURL() != extraction.url) {
+    // The tab left the conversion page, for example by a same-document
+    // navigation, so report the fields read so far rather than read on.
+    return FinishConversionBasketExtraction(id);
+  }
+
+  extraction.did_start = true;
+
+  // Main frame only, never a subframe, in an isolated world so that the page
+  // cannot tamper with the script.
+  web_contents()->GetPrimaryMainFrame()->ExecuteJavaScriptInIsolatedWorld(
+      BuildConversionBasketExtractionJavaScript(*extraction.mojom_rules),
+      base::BindOnce(&AdsTabHelper::OnRunConversionBasketExtraction,
+                     weak_factory_.GetWeakPtr(), id),
+      ISOLATED_WORLD_ID_BRAVE_INTERNAL);
+}
+
+void AdsTabHelper::OnRunConversionBasketExtraction(int32_t id,
+                                                   base::Value value) {
+  const auto iter = conversion_basket_extractions_.find(id);
+  if (iter == conversion_basket_extractions_.cend()) {
+    return;
+  }
+  ConversionBasketExtraction& extraction = *iter->second;
+
+  if (const base::DictValue* const dict = value.GetIfDict()) {
+    if (!extraction.mojom_fields->value) {
+      extraction.mojom_fields->value =
+          MaybeGetConversionBasketField(*dict, "value");
+    }
+
+    if (!extraction.mojom_fields->currency) {
+      extraction.mojom_fields->currency =
+          MaybeGetConversionBasketField(*dict, "currency");
+    }
+  }
+
+  if (HasAllConversionBasketFields(extraction) ||
+      extraction.retry_count == kConversionBasketExtractionRetryDelays.size()) {
+    return FinishConversionBasketExtraction(id);
+  }
+
+  extraction.retry_timer.Start(
+      FROM_HERE,
+      kConversionBasketExtractionRetryDelays[extraction.retry_count++],
+      base::BindOnce(&AdsTabHelper::RunConversionBasketExtraction,
+                     weak_factory_.GetWeakPtr(), id));
+}
+
+void AdsTabHelper::FinishConversionBasketExtraction(int32_t id) {
+  const auto iter = conversion_basket_extractions_.find(id);
+  if (iter == conversion_basket_extractions_.cend()) {
+    return;
+  }
+
+  std::unique_ptr<ConversionBasketExtraction> extraction =
+      std::move(iter->second);
+  conversion_basket_extractions_.erase(iter);
+
+  std::move(extraction->callback).Run(std::move(extraction->mojom_fields));
+}
+
+void AdsTabHelper::FinishConversionBasketExtractions() {
+  while (!conversion_basket_extractions_.empty()) {
+    FinishConversionBasketExtraction(
+        conversion_basket_extractions_.cbegin()->first);
+  }
+}
+
 bool AdsTabHelper::IsPlayingMediaWithAudio(const content::MediaPlayerId& id) {
   return media_players_with_audio_.contains(id);
 }
@@ -342,7 +609,11 @@ void AdsTabHelper::OnDiscardContents(tabs::TabInterface* tab,
                                      content::WebContents* new_contents) {
   // The old contents are destroyed. Report the tab as closed and start over
   // with the new contents, as the ads service expects for a new tab.
+  FinishConversionBasketExtractions();
+
   MaybeNotifyTabdidClose();
+
+  MaybeRemoveAdsTabHelper(session_id_, this);
 
   weak_factory_.InvalidateWeakPtrs();
 #if !BUILDFLAG(IS_ANDROID)
@@ -385,6 +656,12 @@ void AdsTabHelper::DidStartNavigation(
 
   is_new_navigation_ = IsNewNavigation(navigation_handle);
 
+  if (!navigation_handle->IsSameDocument()) {
+    // Fields read so far came from the conversion page, so report them rather
+    // than read the next page.
+    FinishConversionBasketExtractions();
+  }
+
   ResetNavigationState();
 }
 
@@ -400,6 +677,13 @@ void AdsTabHelper::DidFinishNavigation(
   if (!navigation_handle->IsInPrimaryMainFrame() ||
       !navigation_handle->HasCommitted()) {
     return;
+  }
+
+  if (!navigation_handle->IsSameDocument()) {
+    // A request that arrived after this navigation started is still waiting
+    // for the conversion page to load, which it never will, so report the
+    // fields read so far rather than read the new document.
+    FinishConversionBasketExtractions();
   }
 
   redirect_chain_ = navigation_handle->GetRedirectChain();
@@ -453,6 +737,10 @@ void AdsTabHelper::DocumentOnLoadCompletedInPrimaryMainFrame() {
   }
 
   ProcessNavigation();
+
+  // Conversions are checked when the navigation finishes, usually before the
+  // document has loaded, so extractions requested meanwhile start now.
+  MaybeRunConversionBasketExtractions();
 
   // Set `was_restored_` to `false` so that listeners are notified of tab
   // changes after the tab is restored.

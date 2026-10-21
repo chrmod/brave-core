@@ -29,7 +29,7 @@ TEST_F(BraveAdsConversionUserDataUtilTest, BuildConversionActionTypeUserData) {
   const AdEventInfo ad_event =
       BuildAdEvent(ad, mojom::ConfirmationType::kViewedImpression,
                    /*created_at=*/test::Now());
-  const ConversionInfo conversion = BuildConversion(ad_event);
+  const ConversionInfo conversion = BuildConversion(ad_event, /*basket=*/{});
 
   // Act & Assert
   EXPECT_EQ(base::test::ParseJsonDict(

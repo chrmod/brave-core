@@ -18,6 +18,8 @@
 #include "mojo/public/cpp/bindings/associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 
+class GURL;
+
 namespace brave_ads {
 class AdsClientNotifierObserver;
 }  // namespace brave_ads
@@ -56,6 +58,12 @@ class BatAdsClientMojoBridge final : public brave_ads::AdsClient {
                       int days_ago,
                       brave_ads::GetSiteHistoryCallback callback) override;
 
+  void ExtractConversionBasket(
+      int32_t tab_id,
+      const GURL& url,
+      brave_ads::mojom::ConversionBasketRulesInfoPtr mojom_rules,
+      brave_ads::ExtractConversionBasketCallback callback) override;
+
   void UrlRequest(brave_ads::mojom::UrlRequestInfoPtr mojom_url_request,
                   brave_ads::UrlRequestCallback callback) override;
 
@@ -66,9 +74,10 @@ class BatAdsClientMojoBridge final : public brave_ads::AdsClient {
               brave_ads::ResultCallback callback) override;
   void Load(const std::string& name, brave_ads::LoadCallback callback) override;
 
-  void LoadResourceComponent(const std::string& id,
-                             int version,
-                             brave_ads::LoadResourceComponentCallback callback) override;
+  void LoadResourceComponent(
+      const std::string& id,
+      int version,
+      brave_ads::LoadResourceComponentCallback callback) override;
 
   void ShowScheduledCaptcha(const std::string& payment_id,
                             const std::string& captcha_id) override;

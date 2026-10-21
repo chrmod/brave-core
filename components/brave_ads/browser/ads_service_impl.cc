@@ -244,8 +244,6 @@ void AdsServiceImpl::Shutdown() {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-
-
 void AdsServiceImpl::Migrate() {
   // Added 10/2025.
   if (!local_state_->HasPrefPath(prefs::kFirstRunAt)) {
@@ -804,9 +802,8 @@ void AdsServiceImpl::OnAdsPrefChanged(const std::string& path) {
     // `ClearAdsPrefs`, which mutates `pref_change_registrar_` and must not do
     // so re-entrantly from within this pref's own change notification.
     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
-        FROM_HERE,
-        base::BindOnce(&AdsServiceImpl::MaybeClearAdsData,
-                       weak_ptr_factory_.GetWeakPtr(), path));
+        FROM_HERE, base::BindOnce(&AdsServiceImpl::MaybeClearAdsData,
+                                  weak_ptr_factory_.GetWeakPtr(), path));
   }
 
   if (path == prefs::kNotificationsEnabled) {
@@ -1587,6 +1584,15 @@ void AdsServiceImpl::GetSiteHistory(int max_count,
           },
           std::move(callback)),
       &history_service_task_tracker_);
+}
+
+void AdsServiceImpl::ExtractConversionBasket(
+    int32_t tab_id,
+    const GURL& url,
+    mojom::ConversionBasketRulesInfoPtr mojom_rules,
+    ExtractConversionBasketCallback callback) {
+  delegate_->ExtractConversionBasket(tab_id, url, std::move(mojom_rules),
+                                     std::move(callback));
 }
 
 void AdsServiceImpl::UrlRequest(mojom::UrlRequestInfoPtr url_request,

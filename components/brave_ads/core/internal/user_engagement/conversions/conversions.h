@@ -6,6 +6,7 @@
 #ifndef BRAVE_COMPONENTS_BRAVE_ADS_CORE_INTERNAL_USER_ENGAGEMENT_CONVERSIONS_CONVERSIONS_H_
 #define BRAVE_COMPONENTS_BRAVE_ADS_CORE_INTERNAL_USER_ENGAGEMENT_CONVERSIONS_CONVERSIONS_H_
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -17,6 +18,7 @@
 #include "brave/components/brave_ads/core/internal/tabs/tab_manager_observer.h"
 #include "brave/components/brave_ads/core/internal/user_engagement/ad_events/ad_event_info.h"
 #include "brave/components/brave_ads/core/internal/user_engagement/ad_events/ad_events_database_table.h"
+#include "brave/components/brave_ads/core/mojom/brave_ads.mojom-forward.h"
 
 class GURL;
 
@@ -24,6 +26,7 @@ namespace brave_ads {
 
 class ConversionsObserver;
 class TabManager;
+struct ConversionBasketInfo;
 struct ConversionInfo;
 
 class Conversions final : public TabManagerObserver {
@@ -39,28 +42,48 @@ class Conversions final : public TabManagerObserver {
   void RemoveObserver(ConversionsObserver* observer);
 
   // Examine potential view-through or click-through conversions by matching
-  // URL patterns in the redirect chain against known campaign conversions.
-  void MaybeConvert(const std::vector<GURL>& redirect_chain);
+  // URL patterns in the redirect chain of the tab for `tab_id` against known
+  // campaign conversions.
+  void MaybeConvert(int32_t tab_id, const std::vector<GURL>& redirect_chain);
 
  private:
-  void GetCampaignConversions(const std::vector<GURL>& redirect_chain);
+  void GetCampaignConversions(int32_t tab_id,
+                              const std::vector<GURL>& redirect_chain);
   void GetCampaignConversionsCallback(
+      int32_t tab_id,
       const std::vector<GURL>& redirect_chain,
       bool success,
       const CampaignConversionList& campaign_conversions);
 
-  void GetAdEvents(const std::vector<GURL>& redirect_chain,
+  void GetAdEvents(int32_t tab_id,
+                   const std::vector<GURL>& redirect_chain,
                    const CampaignConversionList& campaign_conversions);
-  void GetAdEventsCallback(const std::vector<GURL>& redirect_chain,
+  void GetAdEventsCallback(int32_t tab_id,
+                           const std::vector<GURL>& redirect_chain,
                            const CampaignConversionList& campaign_conversions,
                            bool success,
                            const AdEventList& ad_events);
 
-  void CheckForConversions(const std::vector<GURL>& redirect_chain,
+  void CheckForConversions(int32_t tab_id,
+                           const std::vector<GURL>& redirect_chain,
                            const CampaignConversionList& campaign_conversions,
                            const AdEventList& ad_events);
-  void Convert(const AdEventInfo& ad_event);
-  void ConvertCallback(const AdEventInfo& ad_event, bool success);
+
+  // Reads the basket from the conversion page first if the campaign configures
+  // where to find it.
+  void Convert(int32_t tab_id,
+               const GURL& url,
+               const AdEventInfo& ad_event,
+               const CampaignConversionInfo& campaign_conversion);
+  void ExtractConversionBasketCallback(
+      const AdEventInfo& ad_event,
+      const CampaignConversionInfo& campaign_conversion,
+      mojom::ConversionBasketFieldsInfoPtr mojom_fields);
+  void RecordConversion(const AdEventInfo& ad_event,
+                        const ConversionBasketInfo& basket);
+  void RecordConversionCallback(const AdEventInfo& ad_event,
+                                const ConversionBasketInfo& basket,
+                                bool success);
 
   void NotifyDidConvertAd(const ConversionInfo& conversion);
   void NotifyFailedToConvertAd(const std::string& creative_instance_id);

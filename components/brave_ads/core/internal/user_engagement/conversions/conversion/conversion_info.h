@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "brave/components/brave_ads/core/internal/user_engagement/conversions/actions/conversion_action_types.h"
+#include "brave/components/brave_ads/core/internal/user_engagement/conversions/basket/conversion_basket_info.h"
 #include "brave/components/brave_ads/core/mojom/brave_ads.mojom-shared.h"
 
 namespace brave_ads {
@@ -36,6 +37,7 @@ struct ConversionInfo final {
   std::string advertiser_id;
   std::string segment;
   ConversionActionType action_type = ConversionActionType::kUndefined;
+  ConversionBasketInfo basket;
 };
 
 using ConversionList = std::vector<ConversionInfo>;

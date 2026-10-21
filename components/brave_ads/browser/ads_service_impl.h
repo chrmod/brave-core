@@ -358,6 +358,12 @@ class AdsServiceImpl : public AdsService,
                       int recent_day_range,
                       GetSiteHistoryCallback callback) override;
 
+  void ExtractConversionBasket(
+      int32_t tab_id,
+      const GURL& url,
+      mojom::ConversionBasketRulesInfoPtr mojom_rules,
+      ExtractConversionBasketCallback callback) override;
+
   // TODO(https://github.com/brave/brave-browser/issues/14676) Decouple URL
   // request business logic.
   void UrlRequest(mojom::UrlRequestInfoPtr mojom_url_request,

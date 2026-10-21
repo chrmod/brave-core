@@ -6,7 +6,12 @@
 #include "brave/components/brave_ads/content/browser/creatives/search_result_ad/creative_search_result_ad_mojom_web_page_entities_extractor.h"
 
 #include <array>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
+#include "base/check_op.h"
 #include "brave/components/brave_ads/content/browser/creatives/search_result_ad/creative_search_result_ad_constants.h"
 #include "brave/components/brave_ads/content/browser/creatives/search_result_ad/creative_search_result_ad_test_constants.h"
 #include "brave/components/brave_ads/content/browser/creatives/search_result_ad/test/creative_search_result_ad_mojom_test_util.h"
@@ -44,6 +49,29 @@ void VerifyRequiredMojomCampaignConversionExpectations(
       ::testing::Optional(std::string(test::kCampaignConversionUrlPattern)));
   EXPECT_EQ(mojom_creative_ad->campaign_conversion->observation_window,
             test::kCampaignConversionObservationWindow);
+}
+
+// Returns the extracted campaign conversion after adding `properties`, as
+// name and value pairs, to the creative search result ad entity.
+mojom::CampaignConversionInfoPtr ExtractCampaignConversionWithProperties(
+    const std::vector<std::pair<std::string, std::string>>& properties) {
+  std::vector<schema_org::mojom::EntityPtr> mojom_web_page_entities =
+      test::CreativeSearchResultAdMojomWebPageEntities(
+          /*excluded_property_names=*/{});
+  std::vector<schema_org::mojom::PropertyPtr>& mojom_properties =
+      mojom_web_page_entities[0]
+          ->properties[0]
+          ->values->get_entity_values()[0]
+          ->properties;
+  for (const auto& [name, value] : properties) {
+    test::AddMojomProperty<std::string>(&mojom_properties, name, value);
+  }
+
+  std::vector<mojom::CreativeSearchResultAdInfoPtr> creative_search_result_ads =
+      ExtractCreativeSearchResultAdsFromMojomWebPageEntities(
+          mojom_web_page_entities);
+  CHECK_EQ(1U, creative_search_result_ads.size());
+  return std::move(creative_search_result_ads[0]->campaign_conversion);
 }
 
 }  // namespace
@@ -358,6 +386,66 @@ TEST(BraveAdsCreativeSearchResultAdMojomWebPageEntitiesExtractorTest,
     VerifyRequiredMojomCreativeAdExpectations(mojom_creative_ad);
     EXPECT_FALSE(mojom_creative_ad->campaign_conversion);
   }
+}
+
+TEST(BraveAdsCreativeSearchResultAdMojomWebPageEntitiesExtractorTest,
+     ExtractCampaignConversionBasket) {
+  const mojom::CampaignConversionInfoPtr mojom_campaign_conversion =
+      ExtractCampaignConversionWithProperties(
+          {{kCampaignConversionValueSelectorPropertyName,
+            "meta[name=total]"},
+           {kCampaignConversionValueAttributePropertyName, "content"},
+           {kCampaignConversionCurrencySelectorPropertyName, ".currency"}});
+  ASSERT_TRUE(mojom_campaign_conversion);
+
+  EXPECT_EQ(mojom::ConversionBasketRulesInfo::New(
+                mojom::ConversionBasketFieldRuleInfo::New("meta[name=total]",
+                                                          "content"),
+                mojom::ConversionBasketFieldRuleInfo::New(
+                    ".currency", /*attribute=*/std::nullopt)),
+            mojom_campaign_conversion->basket_rules);
+  EXPECT_FALSE(mojom_campaign_conversion->basket_currency);
+}
+
+TEST(BraveAdsCreativeSearchResultAdMojomWebPageEntitiesExtractorTest,
+     ExtractCampaignConversionBasketWithFixedCurrency) {
+  const mojom::CampaignConversionInfoPtr mojom_campaign_conversion =
+      ExtractCampaignConversionWithProperties(
+          {{kCampaignConversionValueSelectorPropertyName, ".total"},
+           {kCampaignConversionCurrencyPropertyName, "EUR"},
+           {kCampaignConversionCurrencySelectorPropertyName, ".currency"}});
+  ASSERT_TRUE(mojom_campaign_conversion);
+
+  ASSERT_TRUE(mojom_campaign_conversion->basket_rules);
+  EXPECT_FALSE(mojom_campaign_conversion->basket_rules->currency);
+  EXPECT_EQ("EUR", mojom_campaign_conversion->basket_currency);
+}
+
+TEST(BraveAdsCreativeSearchResultAdMojomWebPageEntitiesExtractorTest,
+     ExtractCampaignConversionWithoutInvalidBasket) {
+  // A currency without a value, an attribute without a selector and an invalid
+  // currency code are dropped, but the conversion is kept.
+  for (const auto& properties :
+       std::vector<std::vector<std::pair<std::string, std::string>>>{
+           {{kCampaignConversionCurrencyPropertyName, "EUR"}},
+           {{kCampaignConversionValueAttributePropertyName, "content"}},
+           {{kCampaignConversionValueSelectorPropertyName,
+             std::string(257, 'a')}}}) {
+    const mojom::CampaignConversionInfoPtr mojom_campaign_conversion =
+        ExtractCampaignConversionWithProperties(properties);
+    ASSERT_TRUE(mojom_campaign_conversion);
+
+    EXPECT_FALSE(mojom_campaign_conversion->basket_rules);
+    EXPECT_FALSE(mojom_campaign_conversion->basket_currency);
+  }
+
+  const mojom::CampaignConversionInfoPtr mojom_campaign_conversion =
+      ExtractCampaignConversionWithProperties(
+          {{kCampaignConversionValueSelectorPropertyName, ".total"},
+           {kCampaignConversionCurrencyPropertyName, "euro"}});
+  ASSERT_TRUE(mojom_campaign_conversion);
+  EXPECT_TRUE(mojom_campaign_conversion->basket_rules);
+  EXPECT_FALSE(mojom_campaign_conversion->basket_currency);
 }
 
 }  // namespace brave_ads

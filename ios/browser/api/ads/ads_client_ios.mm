@@ -77,9 +77,10 @@ void AdsClientIOS::Save(const std::string& name,
   [bridge_ save:name value:value callback:std::move(callback)];
 }
 
-void AdsClientIOS::LoadResourceComponent(const std::string& id,
-                                         int version,
-                                         brave_ads::LoadResourceComponentCallback callback) {
+void AdsClientIOS::LoadResourceComponent(
+    const std::string& id,
+    int version,
+    brave_ads::LoadResourceComponentCallback callback) {
   [bridge_ loadResourceComponent:id
                          version:version
                         callback:std::move(callback)];
@@ -91,6 +92,15 @@ void AdsClientIOS::GetSiteHistory(int max_count,
   [bridge_ getSiteHistory:max_count
                   forDays:days_ago
                  callback:std::move(callback)];
+}
+
+void AdsClientIOS::ExtractConversionBasket(
+    int32_t /*tab_id*/,
+    const GURL& /*url*/,
+    brave_ads::mojom::ConversionBasketRulesInfoPtr /*mojom_rules*/,
+    brave_ads::ExtractConversionBasketCallback callback) {
+  // Not supported on iOS; conversions are reported without basket fields.
+  std::move(callback).Run(/*mojom_fields=*/nullptr);
 }
 
 void AdsClientIOS::Remove(const std::string& name,

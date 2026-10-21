@@ -6,13 +6,18 @@
 #ifndef BRAVE_BROWSER_BRAVE_ADS_TABS_ADS_TAB_HELPER_H_
 #define BRAVE_BROWSER_BRAVE_ADS_TABS_ADS_TAB_HELPER_H_
 
+#include <cstdint>
+#include <memory>
 #include <optional>
 #include <vector>
 
+#include "base/containers/flat_map.h"
 #include "base/containers/flat_set.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/values.h"
+#include "brave/components/brave_ads/core/mojom/brave_ads.mojom-forward.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/tabs/contents_observing_tab_feature.h"
 #include "components/sessions/core/session_id.h"
@@ -35,6 +40,10 @@ class TabInterface;
 namespace brave_ads {
 
 class AdsService;
+struct ConversionBasketExtraction;
+
+using ExtractConversionBasketCallback =
+    base::OnceCallback<void(mojom::ConversionBasketFieldsInfoPtr mojom_fields)>;
 
 // Notifies the ads service of tab events. Owned by BraveTabFeatures.
 class AdsTabHelper final :
@@ -54,7 +63,18 @@ class AdsTabHelper final :
 
   ~AdsTabHelper() override;
 
+  // Returns the tab helper for the tab with `session_id`, or `nullptr`.
+  static AdsTabHelper* FromSessionId(SessionID session_id);
+
   AdsService* ads_service() { return ads_service_; }
+
+  // Reads the basket fields described by `mojom_rules` from the page in the
+  // primary main frame once it has loaded, retrying while a field is missing.
+  // Runs `callback` with `nullptr` if the tab no longer shows `url`, or with
+  // the fields read so far if the tab navigates away or the time runs out.
+  void ExtractConversionBasket(const GURL& url,
+                               mojom::ConversionBasketRulesInfoPtr mojom_rules,
+                               ExtractConversionBasketCallback callback);
 
   void SetAdsServiceForTesting(AdsService* ads_service);
 
@@ -88,6 +108,12 @@ class AdsTabHelper final :
   void OnMaybeNotifyTabTextContentDidChange(
       const std::vector<GURL>& redirect_chain,
       base::Value value);
+
+  void MaybeRunConversionBasketExtractions();
+  void RunConversionBasketExtraction(int32_t id);
+  void OnRunConversionBasketExtraction(int32_t id, base::Value value);
+  void FinishConversionBasketExtraction(int32_t id);
+  void FinishConversionBasketExtractions();
 
   bool IsPlayingMediaWithAudio(const content::MediaPlayerId& id);
   void PlayerStartedPlayingWithAudio(const content::MediaPlayerId& id);
@@ -143,6 +169,10 @@ class AdsTabHelper final :
   base::flat_set<content::MediaPlayerId> media_players_with_audio_;
 
   std::optional<bool> is_browser_active_;
+
+  int32_t next_conversion_basket_extraction_id_ = 0;
+  base::flat_map</*id*/ int32_t, std::unique_ptr<ConversionBasketExtraction>>
+      conversion_basket_extractions_;
 
 #if !BUILDFLAG(IS_ANDROID)
   base::ScopedObservation<BrowserCollection, BrowserCollectionObserver>

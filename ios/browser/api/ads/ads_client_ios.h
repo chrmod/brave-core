@@ -43,12 +43,18 @@ class AdsClientIOS : public brave_ads::AdsClient {
   void Remove(const std::string& name,
               brave_ads::ResultCallback callback) override;
   void Load(const std::string& name, brave_ads::LoadCallback callback) override;
-  void LoadResourceComponent(const std::string& id,
-                             int version,
-                             brave_ads::LoadResourceComponentCallback callback) override;
+  void LoadResourceComponent(
+      const std::string& id,
+      int version,
+      brave_ads::LoadResourceComponentCallback callback) override;
   void GetSiteHistory(int max_count,
                       int days_ago,
                       brave_ads::GetSiteHistoryCallback callback) override;
+  void ExtractConversionBasket(
+      int32_t tab_id,
+      const GURL& url,
+      brave_ads::mojom::ConversionBasketRulesInfoPtr mojom_rules,
+      brave_ads::ExtractConversionBasketCallback callback) override;
   void ShowScheduledCaptcha(const std::string& payment_id,
                             const std::string& captcha_id) override;
   void Log(const char* file,

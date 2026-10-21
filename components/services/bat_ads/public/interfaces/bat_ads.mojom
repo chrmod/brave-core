@@ -84,6 +84,11 @@ interface BatAdsClient {
   GetSiteHistory(int32 max_count, int32 days_ago) =>
       (array<url.mojom.Url> site_history);
 
+  ExtractConversionBasket(int32 tab_id,
+                          url.mojom.Url url,
+                          brave_ads.mojom.ConversionBasketRulesInfo rules) =>
+      (brave_ads.mojom.ConversionBasketFieldsInfo? fields);
+
   UrlRequest(brave_ads.mojom.UrlRequestInfo mojom_url_request) =>
       (brave_ads.mojom.UrlResponseInfo mojom_url_response);
 

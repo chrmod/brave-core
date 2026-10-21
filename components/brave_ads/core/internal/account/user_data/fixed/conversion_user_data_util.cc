@@ -5,6 +5,8 @@
 
 #include "brave/components/brave_ads/core/internal/account/user_data/fixed/conversion_user_data_util.h"
 
+#include <optional>
+
 #include "base/check_op.h"
 #include "brave/components/brave_ads/core/internal/account/user_data/fixed/conversion_user_data_constants.h"
 #include "brave/components/brave_ads/core/internal/user_engagement/conversions/actions/conversion_action_types.h"
@@ -19,6 +21,25 @@ base::DictValue BuildConversionActionTypeUserData(
 
   return base::DictValue().Set(kConversionActionTypeKey,
                                ToString(conversion.action_type));
+}
+
+std::optional<base::DictValue> BuildConversionBasketUserData(
+    const ConversionInfo& conversion) {
+  if (conversion.basket.IsEmpty()) {
+    return std::nullopt;
+  }
+
+  base::DictValue dict;
+
+  if (conversion.basket.value) {
+    dict.Set(kConversionBasketValueKey, *conversion.basket.value);
+  }
+
+  if (conversion.basket.currency) {
+    dict.Set(kConversionBasketCurrencyKey, *conversion.basket.currency);
+  }
+
+  return dict;
 }
 
 }  // namespace brave_ads

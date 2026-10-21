@@ -11,7 +11,8 @@
 
 namespace brave_ads {
 
-ConversionInfo BuildConversion(const AdEventInfo& ad_event) {
+ConversionInfo BuildConversion(const AdEventInfo& ad_event,
+                               const ConversionBasketInfo& basket) {
   ConversionInfo conversion;
 
   conversion.ad_type = ad_event.type;
@@ -21,6 +22,7 @@ ConversionInfo BuildConversion(const AdEventInfo& ad_event) {
   conversion.advertiser_id = ad_event.advertiser_id;
   conversion.segment = ad_event.segment;
   conversion.action_type = ToConversionActionType(ad_event.confirmation_type);
+  conversion.basket = basket;
 
   return conversion;
 }

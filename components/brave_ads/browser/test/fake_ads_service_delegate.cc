@@ -5,6 +5,10 @@
 
 #include "brave/components/brave_ads/browser/test/fake_ads_service_delegate.h"
 
+#include <utility>
+
+#include "brave/components/brave_ads/core/mojom/brave_ads.mojom.h"
+
 namespace brave_ads::test {
 
 FakeAdsServiceDelegate::FakeAdsServiceDelegate() = default;
@@ -56,6 +60,14 @@ void FakeAdsServiceDelegate::OpenNewTabWithUrl(const GURL& url) {
 
 bool FakeAdsServiceDelegate::IsFullScreenMode() {
   return false;
+}
+
+void FakeAdsServiceDelegate::ExtractConversionBasket(
+    int32_t /*tab_id*/,
+    const GURL& /*url*/,
+    mojom::ConversionBasketRulesInfoPtr /*mojom_rules*/,
+    base::OnceCallback<void(mojom::ConversionBasketFieldsInfoPtr)> callback) {
+  std::move(callback).Run(/*mojom_fields=*/nullptr);
 }
 
 std::string FakeAdsServiceDelegate::GetVariationsCountryCode() {

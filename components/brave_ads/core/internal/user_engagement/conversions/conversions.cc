@@ -6,11 +6,13 @@
 #include "brave/components/brave_ads/core/internal/user_engagement/conversions/conversions.h"
 
 #include <ranges>
+#include <utility>
 
 #include "base/check.h"
 #include "base/functional/bind.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
+#include "brave/components/brave_ads/core/internal/ads_client/ads_client_util.h"
 #include "brave/components/brave_ads/core/internal/common/logging_util.h"
 #include "brave/components/brave_ads/core/internal/common/time/time_formatting_util.h"
 #include "brave/components/brave_ads/core/internal/creatives/conversions/campaign_conversion_info.h"
@@ -19,12 +21,15 @@
 #include "brave/components/brave_ads/core/internal/tabs/tab_manager.h"
 #include "brave/components/brave_ads/core/internal/user_engagement/ad_events/ad_event_builder.h"
 #include "brave/components/brave_ads/core/internal/user_engagement/ad_events/ad_events.h"
+#include "brave/components/brave_ads/core/internal/user_engagement/conversions/basket/conversion_basket_info.h"
+#include "brave/components/brave_ads/core/internal/user_engagement/conversions/basket/conversion_basket_util.h"
 #include "brave/components/brave_ads/core/internal/user_engagement/conversions/conversion/conversion_builder.h"
 #include "brave/components/brave_ads/core/internal/user_engagement/conversions/conversion/conversion_info.h"
 #include "brave/components/brave_ads/core/internal/user_engagement/conversions/conversions_feature.h"
 #include "brave/components/brave_ads/core/internal/user_engagement/conversions/conversions_observer.h"
 #include "brave/components/brave_ads/core/internal/user_engagement/conversions/conversions_util.h"
 #include "brave/components/brave_ads/core/mojom/brave_ads.mojom.h"
+#include "brave/components/brave_ads/core/public/ads_client/ads_client.h"
 #include "brave/components/brave_ads/core/public/ads_constants.h"
 #include "url/gurl.h"
 
@@ -48,24 +53,27 @@ void Conversions::RemoveObserver(ConversionsObserver* const observer) {
   observers_.RemoveObserver(observer);
 }
 
-void Conversions::MaybeConvert(const std::vector<GURL>& redirect_chain) {
+void Conversions::MaybeConvert(int32_t tab_id,
+                               const std::vector<GURL>& redirect_chain) {
   CHECK(!redirect_chain.empty());
 
   BLOG(1, "Checking for campaign conversions");
 
-  GetCampaignConversions(redirect_chain);
+  GetCampaignConversions(tab_id, redirect_chain);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 void Conversions::GetCampaignConversions(
+    int32_t tab_id,
     const std::vector<GURL>& redirect_chain) {
   campaign_conversions_database_table_.GetUnexpired(
       base::BindOnce(&Conversions::GetCampaignConversionsCallback,
-                     weak_factory_.GetWeakPtr(), redirect_chain));
+                     weak_factory_.GetWeakPtr(), tab_id, redirect_chain));
 }
 
 void Conversions::GetCampaignConversionsCallback(
+    int32_t tab_id,
     const std::vector<GURL>& redirect_chain,
     bool success,
     const CampaignConversionList& campaign_conversions) {
@@ -77,20 +85,22 @@ void Conversions::GetCampaignConversionsCallback(
     return BLOG(1, "There are no campaign conversions");
   }
 
-  GetAdEvents(redirect_chain, campaign_conversions);
+  GetAdEvents(tab_id, redirect_chain, campaign_conversions);
 }
 
 void Conversions::GetAdEvents(
+    int32_t tab_id,
     const std::vector<GURL>& redirect_chain,
     const CampaignConversionList& campaign_conversions) {
   ad_events_database_table_.GetUnexpired(
       kAdEventsTimeWindow.Get(),
       base::BindOnce(&Conversions::GetAdEventsCallback,
-                     weak_factory_.GetWeakPtr(), redirect_chain,
+                     weak_factory_.GetWeakPtr(), tab_id, redirect_chain,
                      campaign_conversions));
 }
 
 void Conversions::GetAdEventsCallback(
+    int32_t tab_id,
     const std::vector<GURL>& redirect_chain,
     const CampaignConversionList& campaign_conversions,
     bool success,
@@ -99,10 +109,11 @@ void Conversions::GetAdEventsCallback(
     return BLOG(0, "Failed to get ad events");
   }
 
-  CheckForConversions(redirect_chain, campaign_conversions, ad_events);
+  CheckForConversions(tab_id, redirect_chain, campaign_conversions, ad_events);
 }
 
 void Conversions::CheckForConversions(
+    int32_t tab_id,
     const std::vector<GURL>& redirect_chain,
     const CampaignConversionList& campaign_conversions,
     const AdEventList& ad_events) {
@@ -167,7 +178,8 @@ void Conversions::CheckForConversions(
       continue;
     }
 
-    Convert(ad_event);
+    Convert(tab_id, /*url=*/redirect_chain.back(), ad_event,
+            campaign_conversion_bucket.front());
 
     did_convert = true;
 
@@ -186,20 +198,58 @@ void Conversions::CheckForConversions(
   }
 }
 
-void Conversions::Convert(const AdEventInfo& ad_event) {
-  RecordAdEvent(RebuildAdEvent(ad_event, mojom::ConfirmationType::kConversion,
-                               /*created_at=*/base::Time::Now()),
-                base::BindOnce(&Conversions::ConvertCallback,
-                               weak_factory_.GetWeakPtr(), ad_event));
+void Conversions::Convert(int32_t tab_id,
+                          const GURL& url,
+                          const AdEventInfo& ad_event,
+                          const CampaignConversionInfo& campaign_conversion) {
+  mojom::ConversionBasketRulesInfoPtr mojom_rules =
+      BuildConversionBasketRules(campaign_conversion);
+  if (!mojom_rules) {
+    return RecordConversion(ad_event, /*basket=*/{});
+  }
+
+  BLOG(1, "Reading the basket for campaign id " << campaign_conversion.id
+                                                << " from the conversion page");
+
+  GetAdsClient().ExtractConversionBasket(
+      tab_id, url, std::move(mojom_rules),
+      base::BindOnce(&Conversions::ExtractConversionBasketCallback,
+                     weak_factory_.GetWeakPtr(), ad_event,
+                     campaign_conversion));
 }
 
-void Conversions::ConvertCallback(const AdEventInfo& ad_event, bool success) {
+void Conversions::ExtractConversionBasketCallback(
+    const AdEventInfo& ad_event,
+    const CampaignConversionInfo& campaign_conversion,
+    mojom::ConversionBasketFieldsInfoPtr mojom_fields) {
+  const ConversionBasketInfo basket =
+      BuildConversionBasket(campaign_conversion, mojom_fields.get());
+  if (basket.IsEmpty()) {
+    // The conversion is still reported, without the basket.
+    BLOG(1, "Failed to read the basket for campaign id "
+                << campaign_conversion.id);
+  }
+
+  RecordConversion(ad_event, basket);
+}
+
+void Conversions::RecordConversion(const AdEventInfo& ad_event,
+                                   const ConversionBasketInfo& basket) {
+  RecordAdEvent(RebuildAdEvent(ad_event, mojom::ConfirmationType::kConversion,
+                               /*created_at=*/base::Time::Now()),
+                base::BindOnce(&Conversions::RecordConversionCallback,
+                               weak_factory_.GetWeakPtr(), ad_event, basket));
+}
+
+void Conversions::RecordConversionCallback(const AdEventInfo& ad_event,
+                                           const ConversionBasketInfo& basket,
+                                           bool success) {
   if (!success) {
     BLOG(0, "Failed to record ad conversion event");
     return NotifyFailedToConvertAd(ad_event.creative_instance_id);
   }
 
-  const ConversionInfo conversion = BuildConversion(ad_event);
+  const ConversionInfo conversion = BuildConversion(ad_event, basket);
   NotifyDidConvertAd(conversion);
 }
 
@@ -214,7 +264,7 @@ void Conversions::NotifyFailedToConvertAd(
 }
 
 void Conversions::OnTabDidChange(const TabInfo& tab) {
-  MaybeConvert(tab.redirect_chain);
+  MaybeConvert(tab.id, tab.redirect_chain);
 }
 
 }  // namespace brave_ads

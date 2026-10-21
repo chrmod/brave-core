@@ -39,7 +39,12 @@ void BindColumnTypes(const mojom::DBActionInfoPtr& mojom_db_action) {
       mojom::DBBindColumnType::kString,  // campaign_id
       mojom::DBBindColumnType::kString,  // url_pattern
       mojom::DBBindColumnType::kInt,     // observation_window
-      mojom::DBBindColumnType::kTime     // expire_at
+      mojom::DBBindColumnType::kTime,    // expire_at
+      mojom::DBBindColumnType::kString,  // basket_value_selector
+      mojom::DBBindColumnType::kString,  // basket_value_attribute
+      mojom::DBBindColumnType::kString,  // basket_currency
+      mojom::DBBindColumnType::kString,  // basket_currency_selector
+      mojom::DBBindColumnType::kString   // basket_currency_attribute
   };
 }
 
@@ -60,6 +65,20 @@ size_t BindColumns(const mojom::DBActionInfoPtr& mojom_db_action,
                   campaign_conversion.observation_window.InDays());
     BindColumnTime(mojom_db_action, index++,
                    campaign_conversion.expire_at.value_or(base::Time()));
+    BindColumnString(
+        mojom_db_action, index++,
+        campaign_conversion.basket_value_selector.value_or(""));
+    BindColumnString(
+        mojom_db_action, index++,
+        campaign_conversion.basket_value_attribute.value_or(""));
+    BindColumnString(mojom_db_action, index++,
+                     campaign_conversion.basket_currency.value_or(""));
+    BindColumnString(
+        mojom_db_action, index++,
+        campaign_conversion.basket_currency_selector.value_or(""));
+    BindColumnString(
+        mojom_db_action, index++,
+        campaign_conversion.basket_currency_attribute.value_or(""));
 
     ++row_count;
   }
@@ -108,9 +127,14 @@ std::string BuildInsertSql(const mojom::DBActionInfoPtr& mojom_db_action,
             campaign_id,
             url_pattern,
             observation_window,
-            expire_at
+            expire_at,
+            basket_value_selector,
+            basket_value_attribute,
+            basket_currency,
+            basket_currency_selector,
+            basket_currency_attribute
           ) VALUES $2)",
-      {kTableName, BuildBindColumnPlaceholders(/*column_count=*/4, row_count)},
+      {kTableName, BuildBindColumnPlaceholders(/*column_count=*/9, row_count)},
       nullptr);
 }
 
@@ -187,6 +211,21 @@ void MigrateToV61(const mojom::DBTransactionInfoPtr& mojom_db_transaction) {
   // already maintains an index for it.
 }
 
+void MigrateToV62(const mojom::DBTransactionInfoPtr& mojom_db_transaction) {
+  CHECK(mojom_db_transaction);
+
+  // Where to read the basket on the conversion page. Empty if the campaign does
+  // not report a basket.
+  for (const char* const column :
+       {"basket_value_selector", "basket_value_attribute", "basket_currency",
+        "basket_currency_selector", "basket_currency_attribute"}) {
+    Execute(mojom_db_transaction, R"(
+        ALTER TABLE campaign_conversions
+          ADD COLUMN $1 TEXT NOT NULL DEFAULT '')",
+            {column});
+  }
+}
+
 }  // namespace
 
 void CampaignConversions::Save(
@@ -227,7 +266,12 @@ void CampaignConversions::GetUnexpired(
             campaign_id,
             url_pattern,
             observation_window,
-            expire_at
+            expire_at,
+            basket_value_selector,
+            basket_value_attribute,
+            basket_currency,
+            basket_currency_selector,
+            basket_currency_attribute
           FROM
             $1
           WHERE
@@ -252,7 +296,12 @@ void CampaignConversions::GetActive(
             campaign_conversion.campaign_id,
             campaign_conversion.url_pattern,
             campaign_conversion.observation_window,
-            campaign_conversion.expire_at
+            campaign_conversion.expire_at,
+            campaign_conversion.basket_value_selector,
+            campaign_conversion.basket_value_attribute,
+            campaign_conversion.basket_currency,
+            campaign_conversion.basket_currency_selector,
+            campaign_conversion.basket_currency_attribute
           FROM
             $1 AS campaign_conversion
             INNER JOIN ad_events
@@ -294,7 +343,12 @@ void CampaignConversions::Create(
         campaign_id TEXT NOT NULL PRIMARY KEY ON CONFLICT REPLACE,
         url_pattern TEXT NOT NULL,
         observation_window INTEGER NOT NULL,
-        expire_at TIMESTAMP NOT NULL
+        expire_at TIMESTAMP NOT NULL,
+        basket_value_selector TEXT NOT NULL DEFAULT '',
+        basket_value_attribute TEXT NOT NULL DEFAULT '',
+        basket_currency TEXT NOT NULL DEFAULT '',
+        basket_currency_selector TEXT NOT NULL DEFAULT '',
+        basket_currency_attribute TEXT NOT NULL DEFAULT ''
       ))");
 
   // Optimize database query for `GetUnexpired` from schema 35.
@@ -318,6 +372,11 @@ void CampaignConversions::Migrate(
 
     case 61: {
       MigrateToV61(mojom_db_transaction);
+      break;
+    }
+
+    case 62: {
+      MigrateToV62(mojom_db_transaction);
       break;
     }
 
