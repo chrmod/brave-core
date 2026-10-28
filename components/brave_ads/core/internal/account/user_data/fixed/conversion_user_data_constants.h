@@ -12,6 +12,9 @@ inline constexpr char kConversionKey[] = "conversion";
 
 inline constexpr char kConversionActionTypeKey[] = "action";
 
+inline constexpr char kConversionBasketKey[] = "basket";
+inline constexpr char kConversionBasketValueKey[] = "value";
+inline constexpr char kConversionBasketCurrencyKey[] = "currency";
 
 }  // namespace brave_ads
 

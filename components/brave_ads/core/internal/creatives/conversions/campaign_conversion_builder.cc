@@ -31,6 +31,25 @@ std::optional<CampaignConversionInfo> FromMojomMaybeBuildCampaignConversion(
   campaign_conversion.observation_window =
       mojom_creative_ad->campaign_conversion->observation_window;
 
+  const mojom::CampaignConversionInfo& mojom_campaign_conversion =
+      *mojom_creative_ad->campaign_conversion;
+  if (const mojom::ConversionBasketRulesInfoPtr& mojom_basket_rules =
+          mojom_campaign_conversion.basket_rules;
+      mojom_basket_rules && mojom_basket_rules->value) {
+    campaign_conversion.basket_value_selector =
+        mojom_basket_rules->value->selector;
+    campaign_conversion.basket_value_attribute =
+        mojom_basket_rules->value->attribute;
+    campaign_conversion.basket_currency =
+        mojom_campaign_conversion.basket_currency;
+    if (mojom_basket_rules->currency) {
+      campaign_conversion.basket_currency_selector =
+          mojom_basket_rules->currency->selector;
+      campaign_conversion.basket_currency_attribute =
+          mojom_basket_rules->currency->attribute;
+    }
+  }
+
   // Campaign conversions are built and saved when a search result ad is
   // viewed by Rewards users or clicked by non-Rewards users, so the observation
   // window can start immediately.

@@ -10,6 +10,7 @@
 #include "base/test/gmock_callback_support.h"
 #include "brave/components/brave_ads/core/internal/common/test/test_base.h"
 #include "brave/components/brave_ads/core/internal/user_engagement/ad_events/test/ad_event_test_util.h"
+#include "brave/components/brave_ads/core/internal/user_engagement/conversions/basket/conversion_basket_info.h"
 #include "brave/components/brave_ads/core/internal/user_engagement/conversions/conversion/conversion_info.h"  // IWYU pragma: keep
 #include "brave/components/brave_ads/core/internal/user_engagement/conversions/conversions.h"
 #include "brave/components/brave_ads/core/public/ad_units/ad_info.h"
@@ -37,10 +38,20 @@ void BraveAdsConversionsTestBase::VerifyOnDidConvertAdExpectation(
     const AdInfo& ad,
     ConversionActionType action_type,
     base::OnceClosure did_convert_ad_closure) {
-  EXPECT_CALL(conversions_observer_mock_,
-              OnDidConvertAd(/*conversion=*/::testing::FieldsAre(
-                  ad.type, ad.creative_instance_id, ad.creative_set_id,
-                  ad.campaign_id, ad.advertiser_id, ad.segment, action_type)))
+  VerifyOnDidConvertAdExpectation(ad, action_type, /*basket=*/{},
+                                  std::move(did_convert_ad_closure));
+}
+
+void BraveAdsConversionsTestBase::VerifyOnDidConvertAdExpectation(
+    const AdInfo& ad,
+    ConversionActionType action_type,
+    const ConversionBasketInfo& basket,
+    base::OnceClosure did_convert_ad_closure) {
+  EXPECT_CALL(
+      conversions_observer_mock_,
+      OnDidConvertAd(/*conversion=*/::testing::FieldsAre(
+          ad.type, ad.creative_instance_id, ad.creative_set_id, ad.campaign_id,
+          ad.advertiser_id, ad.segment, action_type, basket)))
       .WillOnce(base::test::RunOnceClosure(std::move(did_convert_ad_closure)));
 }
 

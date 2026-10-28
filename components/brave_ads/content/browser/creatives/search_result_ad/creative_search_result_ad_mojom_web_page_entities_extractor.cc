@@ -6,9 +6,11 @@
 #include "brave/components/brave_ads/content/browser/creatives/search_result_ad/creative_search_result_ad_mojom_web_page_entities_extractor.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "base/check.h"
@@ -48,8 +50,16 @@ constexpr auto kRequiredCampaignConversionPropertyNames =
 constexpr auto kCampaignConversionPropertyNames =
     base::MakeFixedFlatSet<std::string_view>(
         base::sorted_unique,
-        {kCampaignConversionObservationWindowPropertyName,
-         kCampaignConversionUrlPatternPropertyName});
+        {kCampaignConversionCurrencyAttributePropertyName,
+         kCampaignConversionCurrencySelectorPropertyName,
+         kCampaignConversionCurrencyPropertyName,
+         kCampaignConversionObservationWindowPropertyName,
+         kCampaignConversionUrlPatternPropertyName,
+         kCampaignConversionValueAttributePropertyName,
+         kCampaignConversionValueSelectorPropertyName});
+
+constexpr size_t kMaxConversionBasketSelectorLength = 256;
+constexpr size_t kMaxConversionBasketAttributeLength = 64;
 
 bool GetOptionalStringValue(
     const schema_org::mojom::PropertyPtr& mojom_property,
@@ -198,6 +208,79 @@ bool ExtractCreativeAdMojomProperty(
   return false;
 }
 
+mojom::ConversionBasketFieldRuleInfo& GetOrCreateConversionBasketFieldRule(
+    mojom::CampaignConversionInfo& mojom_campaign_conversion,
+    bool is_currency) {
+  if (!mojom_campaign_conversion.basket_rules) {
+    mojom_campaign_conversion.basket_rules =
+        mojom::ConversionBasketRulesInfo::New();
+  }
+
+  mojom::ConversionBasketFieldRuleInfoPtr& mojom_rule =
+      is_currency ? mojom_campaign_conversion.basket_rules->currency
+                  : mojom_campaign_conversion.basket_rules->value;
+  if (!mojom_rule) {
+    mojom_rule = mojom::ConversionBasketFieldRuleInfo::New();
+  }
+
+  return *mojom_rule;
+}
+
+bool IsValidConversionBasketFieldRule(
+    const mojom::ConversionBasketFieldRuleInfoPtr& mojom_rule) {
+  return mojom_rule && !mojom_rule->selector.empty() &&
+         mojom_rule->selector.size() <= kMaxConversionBasketSelectorLength &&
+         (!mojom_rule->attribute || (!mojom_rule->attribute->empty() &&
+                                     mojom_rule->attribute->size() <=
+                                         kMaxConversionBasketAttributeLength));
+}
+
+bool IsValidCurrencyCode(std::string_view currency) {
+  return currency.size() == 3 && std::ranges::all_of(currency, [](char c) {
+           return base::IsAsciiUpper(c);
+         });
+}
+
+// Drops basket rules that are incomplete or out of bounds so that a broken
+// configuration still reports the conversion, without the basket.
+void MaybeDropInvalidConversionBasket(
+    mojom::CampaignConversionInfo& mojom_campaign_conversion) {
+  if (mojom_campaign_conversion.basket_currency &&
+      !IsValidCurrencyCode(*mojom_campaign_conversion.basket_currency)) {
+    VLOG(6) << "Invalid campaign conversion basket currency";
+    mojom_campaign_conversion.basket_currency.reset();
+  }
+
+  mojom::ConversionBasketRulesInfoPtr& mojom_rules =
+      mojom_campaign_conversion.basket_rules;
+  if (!mojom_rules) {
+    return;
+  }
+
+  if (mojom_rules->value &&
+      !IsValidConversionBasketFieldRule(mojom_rules->value)) {
+    VLOG(6) << "Invalid campaign conversion basket value rule";
+    mojom_rules->value.reset();
+  }
+
+  if (mojom_rules->currency &&
+      !IsValidConversionBasketFieldRule(mojom_rules->currency)) {
+    VLOG(6) << "Invalid campaign conversion basket currency rule";
+    mojom_rules->currency.reset();
+  }
+
+  if (mojom_campaign_conversion.basket_currency) {
+    // A fixed currency takes precedence over reading it from the page.
+    mojom_rules->currency.reset();
+  }
+
+  if (!mojom_rules->value) {
+    // A currency without a value is meaningless.
+    mojom_rules.reset();
+    mojom_campaign_conversion.basket_currency.reset();
+  }
+}
+
 bool ExtractCampaignConversionMojomProperty(
     const schema_org::mojom::PropertyPtr& mojom_property,
     mojom::CampaignConversionInfo* mojom_campaign_conversion) {
@@ -213,6 +296,45 @@ bool ExtractCampaignConversionMojomProperty(
     }
     if (!url_pattern.empty()) {
       mojom_campaign_conversion->url_pattern = std::move(url_pattern);
+    }
+    return true;
+  }
+
+  if (property_name == kCampaignConversionValueSelectorPropertyName ||
+      property_name == kCampaignConversionCurrencySelectorPropertyName) {
+    std::string selector;
+    if (!GetOptionalStringValue(mojom_property, &selector)) {
+      return false;
+    }
+    GetOrCreateConversionBasketFieldRule(
+        *mojom_campaign_conversion,
+        /*is_currency=*/property_name ==
+            kCampaignConversionCurrencySelectorPropertyName)
+        .selector = std::move(selector);
+    return true;
+  }
+
+  if (property_name == kCampaignConversionValueAttributePropertyName ||
+      property_name == kCampaignConversionCurrencyAttributePropertyName) {
+    std::string attribute;
+    if (!GetOptionalStringValue(mojom_property, &attribute)) {
+      return false;
+    }
+    GetOrCreateConversionBasketFieldRule(
+        *mojom_campaign_conversion,
+        /*is_currency=*/property_name ==
+            kCampaignConversionCurrencyAttributePropertyName)
+        .attribute = std::move(attribute);
+    return true;
+  }
+
+  if (property_name == kCampaignConversionCurrencyPropertyName) {
+    std::string currency;
+    if (!GetOptionalStringValue(mojom_property, &currency)) {
+      return false;
+    }
+    if (!currency.empty()) {
+      mojom_campaign_conversion->basket_currency = std::move(currency);
     }
     return true;
   }
@@ -299,6 +421,7 @@ mojom::CreativeSearchResultAdInfoPtr ExtractMojomEntity(
         std::back_inserter(missing_campaign_conversion_property_names));
 
     if (missing_campaign_conversion_property_names.empty()) {
+      MaybeDropInvalidConversionBasket(*mojom_campaign_conversion);
       mojom_creative_ad->campaign_conversion =
           std::move(mojom_campaign_conversion);
     } else {
@@ -384,6 +507,12 @@ void Log(const std::vector<mojom::CreativeSearchResultAdInfoPtr>&
     if (campaign_conversion.url_pattern) {
       VLOG(6) << kCampaignConversionUrlPatternPropertyName << ": "
               << *campaign_conversion.url_pattern;
+    }
+
+    if (campaign_conversion.basket_rules &&
+        campaign_conversion.basket_rules->value) {
+      VLOG(6) << kCampaignConversionValueSelectorPropertyName << ": "
+              << campaign_conversion.basket_rules->value->selector;
     }
   }
 }

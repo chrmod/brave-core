@@ -40,6 +40,19 @@ inline constexpr char kCampaignConversionUrlPatternPropertyName[] =
 inline constexpr char kCampaignConversionObservationWindowPropertyName[] =
     "data-conversion-observation-window-value";
 
+// Campaign conversion basket. Where to read the basket value and currency
+// on the conversion page, and the currency if it is fixed.
+inline constexpr char kCampaignConversionValueSelectorPropertyName[] =
+    "data-conversion-value-selector-value";
+inline constexpr char kCampaignConversionValueAttributePropertyName[] =
+    "data-conversion-value-attribute-value";
+inline constexpr char kCampaignConversionCurrencyPropertyName[] =
+    "data-conversion-currency-value";
+inline constexpr char kCampaignConversionCurrencySelectorPropertyName[] =
+    "data-conversion-currency-selector-value";
+inline constexpr char kCampaignConversionCurrencyAttributePropertyName[] =
+    "data-conversion-currency-attribute-value";
+
 }  // namespace brave_ads
 
 #endif  // BRAVE_COMPONENTS_BRAVE_ADS_CONTENT_BROWSER_CREATIVES_SEARCH_RESULT_AD_CREATIVE_SEARCH_RESULT_AD_CONSTANTS_H_

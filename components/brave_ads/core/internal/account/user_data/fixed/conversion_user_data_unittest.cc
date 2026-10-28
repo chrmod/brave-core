@@ -11,6 +11,7 @@
 #include "brave/components/brave_ads/core/internal/common/test/time_test_util.h"
 #include "brave/components/brave_ads/core/internal/user_engagement/ad_events/ad_event_builder.h"
 #include "brave/components/brave_ads/core/internal/user_engagement/ad_events/ad_event_info.h"
+#include "brave/components/brave_ads/core/internal/user_engagement/conversions/basket/conversion_basket_info.h"
 #include "brave/components/brave_ads/core/internal/user_engagement/conversions/conversion/conversion_builder.h"
 #include "brave/components/brave_ads/core/internal/user_engagement/conversions/conversion/conversion_info.h"
 #include "brave/components/brave_ads/core/mojom/brave_ads.mojom.h"
@@ -29,7 +30,7 @@ TEST_F(BraveAdsConversionUserDataBuilderTest, BuildConversionUserData) {
   const AdEventInfo ad_event =
       BuildAdEvent(ad, mojom::ConfirmationType::kViewedImpression,
                    /*created_at=*/test::Now());
-  const ConversionInfo conversion = BuildConversion(ad_event);
+  const ConversionInfo conversion = BuildConversion(ad_event, /*basket=*/{});
 
   // Act & Assert
   EXPECT_EQ(base::test::ParseJsonDict(
@@ -38,6 +39,59 @@ TEST_F(BraveAdsConversionUserDataBuilderTest, BuildConversionUserData) {
                       "conversion": [
                         {
                           "action": "view"
+                        }
+                      ]
+                    })JSON"),
+            BuildConversionUserData(conversion));
+}
+
+TEST_F(BraveAdsConversionUserDataBuilderTest,
+       BuildConversionUserDataWithBasket) {
+  // Arrange
+  const AdInfo ad = test::BuildAd(mojom::AdType::kSearchResultAd,
+                                  /*use_random_uuids=*/false);
+  const AdEventInfo ad_event = BuildAdEvent(
+      ad, mojom::ConfirmationType::kClicked, /*created_at=*/test::Now());
+  const ConversionInfo conversion = BuildConversion(
+      ad_event, ConversionBasketInfo{.value = 59.9, .currency = "EUR"});
+
+  // Act & Assert
+  EXPECT_EQ(base::test::ParseJsonDict(
+                R"JSON(
+                    {
+                      "conversion": [
+                        {
+                          "action": "click",
+                          "basket": {
+                            "value": 59.9,
+                            "currency": "EUR"
+                          }
+                        }
+                      ]
+                    })JSON"),
+            BuildConversionUserData(conversion));
+}
+
+TEST_F(BraveAdsConversionUserDataBuilderTest,
+       BuildConversionUserDataWithBasketValueOnly) {
+  // Arrange
+  const AdInfo ad = test::BuildAd(mojom::AdType::kSearchResultAd,
+                                  /*use_random_uuids=*/false);
+  const AdEventInfo ad_event = BuildAdEvent(
+      ad, mojom::ConfirmationType::kClicked, /*created_at=*/test::Now());
+  const ConversionInfo conversion =
+      BuildConversion(ad_event, ConversionBasketInfo{.value = 42.0});
+
+  // Act & Assert
+  EXPECT_EQ(base::test::ParseJsonDict(
+                R"JSON(
+                    {
+                      "conversion": [
+                        {
+                          "action": "click",
+                          "basket": {
+                            "value": 42.0
+                          }
                         }
                       ]
                     })JSON"),

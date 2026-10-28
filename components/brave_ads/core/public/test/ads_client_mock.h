@@ -13,6 +13,7 @@
 #include "brave/components/brave_ads/core/public/ads_client/ads_client.h"
 #include "brave/components/brave_ads/core/public/ads_client/ads_client_callback.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "url/gurl.h"
 
 namespace brave_ads::test {
 
@@ -43,6 +44,13 @@ class AdsClientMock : public AdsClient {
   MOCK_METHOD(void, CloseNotificationAd, (const std::string&));
 
   MOCK_METHOD(void, GetSiteHistory, (int, int, GetSiteHistoryCallback));
+
+  MOCK_METHOD(void,
+              ExtractConversionBasket,
+              (int32_t,
+               const GURL&,
+               mojom::ConversionBasketRulesInfoPtr,
+               ExtractConversionBasketCallback));
 
   MOCK_METHOD(void, UrlRequest, (mojom::UrlRequestInfoPtr, UrlRequestCallback));
 

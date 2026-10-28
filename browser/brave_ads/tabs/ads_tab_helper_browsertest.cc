@@ -10,6 +10,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "base/callback_list.h"
 #include "base/check.h"
@@ -24,8 +26,10 @@
 #include "base/strings/string_util.h"
 #include "base/test/gmock_callback_support.h"
 #include "base/test/test_future.h"
+#include "base/time/time.h"
 #include "brave/browser/brave_ads/ads_service_factory.h"
 #include "brave/components/brave_ads/core/browser/service/test/ads_service_mock.h"
+#include "brave/components/brave_ads/core/mojom/brave_ads.mojom.h"
 #include "brave/components/brave_ads/core/public/prefs/pref_names.h"
 #include "brave/components/brave_rewards/core/pref_names.h"
 #include "brave/components/constants/brave_paths.h"
@@ -61,9 +65,11 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/common/referrer.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_mock_cert_verifier.h"
+#include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/http/http_status_code.h"
@@ -73,6 +79,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/abseil-cpp/absl/strings/str_format.h"
+#include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 #include "url/gurl.h"
 #include "url/url_constants.h"
@@ -86,6 +93,9 @@ namespace {
 constexpr std::string_view kHostName = "brave.com";
 
 constexpr char kHandleRequestUrlPath[] = "/handle_request";
+
+constexpr char kDelayedResponseUrlPath[] = "/delayed_response";
+constexpr base::TimeDelta kDelayedResponseDelay = base::Seconds(3);
 constexpr char kHttpStatusCodeQueryKey[] = "http_status_code";
 
 constexpr char kMultiPageApplicationWebpage[] =
@@ -108,6 +118,14 @@ constexpr char kSinglePageApplicationClickSelector[] =
 constexpr char kAutoplayVideoWebpage[] = "/brave_ads/autoplay_video.html";
 constexpr char kVideoWebpage[] = "/brave_ads/video.html";
 constexpr char kVideoJavascriptDocumentQuerySelector[] = "video";
+
+constexpr char kConversionBasketWebpage[] = "/brave_ads/conversion_basket.html";
+constexpr char kConversionBasketSlowLoadWebpage[] =
+    "/brave_ads/conversion_basket_slow_load.html";
+constexpr char kConversionBasketNextPageWebpage[] =
+    "/brave_ads/conversion_basket_next_page.html";
+constexpr char kConversionBasketSubframeWebpage[] =
+    "/brave_ads/conversion_basket_subframe.html";
 
 MATCHER_P(FileName, filename, "") {
   return arg.ExtractFileName() == filename;
@@ -219,6 +237,15 @@ std::unique_ptr<net::test_server::HttpResponse> HandleHttpStatusCodeQueryKey(
 std::unique_ptr<net::test_server::HttpResponse> HandleRequest(
     const net::test_server::HttpRequest& http_request) {
   const GURL url = http_request.GetURL();
+  if (url.path() == kDelayedResponseUrlPath) {
+    auto http_response =
+        std::make_unique<net::test_server::DelayedHttpResponse>(
+            kDelayedResponseDelay);
+    http_response->set_code(net::HTTP_OK);
+    http_response->set_content_type("text/plain");
+    return http_response;
+  }
+
   if (url.path() != kHandleRequestUrlPath) {
     // Do not handle the request.
     return nullptr;
@@ -235,6 +262,15 @@ std::unique_ptr<net::test_server::HttpResponse> HandleRequest(
   }
 
   NOTREACHED() << "Query key not found. Unable to handle the request.";
+}
+
+mojom::ConversionBasketRulesInfoPtr BuildConversionBasketRules(
+    const std::string& value_selector,
+    const std::optional<std::string>& value_attribute = std::nullopt) {
+  return mojom::ConversionBasketRulesInfo::New(
+      mojom::ConversionBasketFieldRuleInfo::New(value_selector,
+                                                value_attribute),
+      /*currency=*/nullptr);
 }
 
 base::FilePath GetTestDataDir() {
@@ -429,6 +465,38 @@ class BraveAdsTabHelperTest : public PlatformBrowserTest {
     }
 
     SetBrowser(browser_created_observer.Wait());
+  }
+
+  GURL GetURL(std::string_view relative_url) const {
+    return test_server_.GetURL(kHostName, relative_url);
+  }
+
+  // Starts loading `url` and returns once the navigation has committed, which
+  // can be before the document has loaded.
+  void NavigateToRelativeURLWithoutWaitingForLoad(
+      std::string_view relative_url) {
+    content::WebContents* const web_contents = GetActiveWebContents();
+    content::TestNavigationObserver test_navigation_observer(web_contents);
+    web_contents->GetController().LoadURL(
+        GetURL(relative_url), content::Referrer(), ui::PAGE_TRANSITION_TYPED,
+        /*extra_headers=*/std::string());
+    test_navigation_observer.WaitForNavigationFinished();
+  }
+
+  AdsTabHelper& GetAdsTabHelper() {
+    AdsTabHelper* const ads_tab_helper =
+        AdsTabHelper::FromSessionId(SessionID::FromSerializedValue(TabId()));
+    CHECK(ads_tab_helper);
+    return *ads_tab_helper;
+  }
+
+  mojom::ConversionBasketFieldsInfoPtr ExtractConversionBasket(
+      std::string_view relative_url,
+      mojom::ConversionBasketRulesInfoPtr mojom_rules) {
+    base::test::TestFuture<mojom::ConversionBasketFieldsInfoPtr> future;
+    GetAdsTabHelper().ExtractConversionBasket(
+        GetURL(relative_url), std::move(mojom_rules), future.GetCallback());
+    return future.Take();
   }
 
   std::vector<GURL> RedirectChainExpectation(
@@ -963,6 +1031,99 @@ IN_PROC_BROWSER_TEST_F(BraveAdsTabHelperTest,
   ASSERT_TRUE(ads_tab_helper);
 
   EXPECT_FALSE(ads_tab_helper->ads_service());
+}
+
+IN_PROC_BROWSER_TEST_F(BraveAdsTabHelperTest, ExtractConversionBasket) {
+  NavigateToRelativeURL(kConversionBasketWebpage, /*has_user_gesture=*/true);
+
+  mojom::ConversionBasketRulesInfoPtr mojom_rules =
+      BuildConversionBasketRules(".total");
+  mojom_rules->currency = mojom::ConversionBasketFieldRuleInfo::New(
+      ".currency", /*attribute=*/std::nullopt);
+
+  EXPECT_EQ(mojom::ConversionBasketFieldsInfo::New("€ 59,90", "EUR"),
+            ExtractConversionBasket(kConversionBasketWebpage,
+                                    std::move(mojom_rules)));
+}
+
+IN_PROC_BROWSER_TEST_F(BraveAdsTabHelperTest,
+                       ExtractConversionBasketFromAttribute) {
+  NavigateToRelativeURL(kConversionBasketWebpage, /*has_user_gesture=*/true);
+
+  EXPECT_EQ(
+      mojom::ConversionBasketFieldsInfo::New("1234.56",
+                                             /*currency=*/std::nullopt),
+      ExtractConversionBasket(
+          kConversionBasketWebpage,
+          BuildConversionBasketRules("meta[name=purchase-amount]", "content")));
+}
+
+IN_PROC_BROWSER_TEST_F(BraveAdsTabHelperTest,
+                       ExtractConversionBasketRenderedAfterLoad) {
+  NavigateToRelativeURL(kConversionBasketWebpage, /*has_user_gesture=*/true);
+
+  EXPECT_EQ(mojom::ConversionBasketFieldsInfo::New("€ 12,50",
+                                                   /*currency=*/std::nullopt),
+            ExtractConversionBasket(kConversionBasketWebpage,
+                                    BuildConversionBasketRules(".late-total")));
+}
+
+IN_PROC_BROWSER_TEST_F(BraveAdsTabHelperTest,
+                       ExtractConversionBasketOnceDocumentHasLoaded) {
+  NavigateToRelativeURLWithoutWaitingForLoad(kConversionBasketSlowLoadWebpage);
+  ASSERT_FALSE(
+      GetActiveWebContents()->IsDocumentOnLoadCompletedInPrimaryMainFrame());
+
+  EXPECT_EQ(mojom::ConversionBasketFieldsInfo::New("€ 59,90",
+                                                   /*currency=*/std::nullopt),
+            ExtractConversionBasket(kConversionBasketSlowLoadWebpage,
+                                    BuildConversionBasketRules(".total")));
+}
+
+IN_PROC_BROWSER_TEST_F(BraveAdsTabHelperTest,
+                       DoNotExtractConversionBasketFromNextPage) {
+  NavigateToRelativeURLWithoutWaitingForLoad(kConversionBasketSlowLoadWebpage);
+
+  content::WebContents* const web_contents = GetActiveWebContents();
+  const GURL next_page_url = GetURL(kConversionBasketNextPageWebpage);
+  content::TestNavigationManager test_navigation_manager(web_contents,
+                                                         next_page_url);
+  web_contents->GetController().LoadURL(next_page_url, content::Referrer(),
+                                        ui::PAGE_TRANSITION_TYPED,
+                                        /*extra_headers=*/std::string());
+  ASSERT_TRUE(test_navigation_manager.WaitForRequestStart());
+
+  // Requested after the next navigation started but before it committed.
+  base::test::TestFuture<mojom::ConversionBasketFieldsInfoPtr> future;
+  GetAdsTabHelper().ExtractConversionBasket(
+      GetURL(kConversionBasketSlowLoadWebpage),
+      BuildConversionBasketRules(".total"), future.GetCallback());
+
+  test_navigation_manager.ResumeNavigation();
+  ASSERT_TRUE(test_navigation_manager.WaitForNavigationFinished());
+  ASSERT_TRUE(content::WaitForLoadStop(web_contents));
+
+  const mojom::ConversionBasketFieldsInfoPtr mojom_fields = future.Take();
+  ASSERT_TRUE(mojom_fields);
+  EXPECT_NE("€ 99,00", mojom_fields->value.value_or(""));
+}
+
+IN_PROC_BROWSER_TEST_F(BraveAdsTabHelperTest,
+                       DoNotExtractConversionBasketFromSubframe) {
+  NavigateToRelativeURL(kConversionBasketSubframeWebpage,
+                        /*has_user_gesture=*/true);
+
+  EXPECT_EQ(mojom::ConversionBasketFieldsInfo::New(),
+            ExtractConversionBasket(kConversionBasketSubframeWebpage,
+                                    BuildConversionBasketRules(".total")));
+}
+
+IN_PROC_BROWSER_TEST_F(BraveAdsTabHelperTest,
+                       DoNotExtractConversionBasketIfTabLeftConversionPage) {
+  NavigateToRelativeURL(kConversionBasketWebpage, /*has_user_gesture=*/true);
+
+  EXPECT_FALSE(ExtractConversionBasket(kConversionBasketNextPageWebpage,
+                                       BuildConversionBasketRules(".total")));
 }
 
 }  // namespace brave_ads

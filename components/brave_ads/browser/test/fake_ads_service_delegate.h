@@ -46,6 +46,12 @@ class FakeAdsServiceDelegate : public AdsService::Delegate {
   void OpenNewTabWithUrl(const GURL& url) override;
   bool IsFullScreenMode() override;
   std::string GetVariationsCountryCode() override;
+  void ExtractConversionBasket(
+      int32_t tab_id,
+      const GURL& url,
+      mojom::ConversionBasketRulesInfoPtr mojom_rules,
+      base::OnceCallback<void(mojom::ConversionBasketFieldsInfoPtr)> callback)
+      override;
 
   void set_can_show_notifications(bool can_show_notifications) {
     can_show_notifications_ = can_show_notifications;

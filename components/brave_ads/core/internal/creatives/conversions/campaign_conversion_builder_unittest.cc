@@ -35,7 +35,37 @@ TEST_F(BraveAdsCampaignConversionBuilderTest,
               ::testing::FieldsAre(test::kCampaignId,
                                    /*url_pattern*/ "https://brave.com/*",
                                    /*observation_window*/ base::Days(3),
-                                   /*expire_at*/ test::Now() + base::Days(3)));
+                                   /*expire_at*/ test::Now() + base::Days(3),
+                                   /*basket_value_selector*/ std::nullopt,
+                                   /*basket_value_attribute*/ std::nullopt,
+                                   /*basket_currency*/ std::nullopt,
+                                   /*basket_currency_selector*/ std::nullopt,
+                                   /*basket_currency_attribute*/ std::nullopt));
+}
+
+TEST_F(BraveAdsCampaignConversionBuilderTest,
+       BuildCampaignConversionWithBasket) {
+  // Arrange
+  const mojom::CreativeSearchResultAdInfoPtr mojom_creative_ad =
+      test::BuildCreativeSearchResultAdWithConversion(
+          /*use_random_uuids=*/false);
+  mojom_creative_ad->campaign_conversion->basket_rules =
+      mojom::ConversionBasketRulesInfo::New(
+          mojom::ConversionBasketFieldRuleInfo::New(".total",
+                                                    /*attribute=*/std::nullopt),
+          /*currency=*/nullptr);
+  mojom_creative_ad->campaign_conversion->basket_currency = "EUR";
+
+  // Act
+  std::optional<CampaignConversionInfo> campaign_conversion =
+      FromMojomMaybeBuildCampaignConversion(mojom_creative_ad);
+  ASSERT_TRUE(campaign_conversion);
+
+  // Assert
+  EXPECT_EQ(".total", campaign_conversion->basket_value_selector);
+  EXPECT_FALSE(campaign_conversion->basket_value_attribute);
+  EXPECT_EQ("EUR", campaign_conversion->basket_currency);
+  EXPECT_FALSE(campaign_conversion->basket_currency_selector);
 }
 
 TEST_F(BraveAdsCampaignConversionBuilderTest,

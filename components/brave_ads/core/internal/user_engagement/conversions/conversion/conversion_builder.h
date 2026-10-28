@@ -9,9 +9,11 @@
 namespace brave_ads {
 
 struct AdEventInfo;
+struct ConversionBasketInfo;
 struct ConversionInfo;
 
-ConversionInfo BuildConversion(const AdEventInfo& ad_event);
+ConversionInfo BuildConversion(const AdEventInfo& ad_event,
+                               const ConversionBasketInfo& basket);
 
 }  // namespace brave_ads
 

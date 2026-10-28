@@ -55,6 +55,7 @@ source_set("impl") {
     "//brave/browser/brave_adaptive_captcha",
     "//brave/browser/brave_ads/device_id",
     "//brave/browser/brave_ads/services",
+    "//brave/browser/brave_ads/tabs",
     "//brave/browser/brave_ads/tooltips",
     "//brave/browser/brave_stats",
     "//brave/components/brave_adaptive_captcha",

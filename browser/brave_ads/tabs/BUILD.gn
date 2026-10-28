@@ -15,6 +15,7 @@ source_set("tabs") {
 
   public_deps = [
     "//base",
+    "//brave/components/brave_ads/core/mojom",
     "//chrome/browser/ui/tabs:tabs_public",
     "//components/sessions:session_id",
     "//content/public/browser",
@@ -34,6 +35,7 @@ source_set("tabs") {
     "//components/sessions",
     "//components/tabs:public",
     "//ui/base",
+    "//url",
   ]
 }
 

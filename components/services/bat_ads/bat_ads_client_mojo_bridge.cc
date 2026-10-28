@@ -190,6 +190,20 @@ void BatAdsClientMojoBridge::GetSiteHistory(
                                                     std::move(callback));
 }
 
+void BatAdsClientMojoBridge::ExtractConversionBasket(
+    int32_t tab_id,
+    const GURL& url,
+    brave_ads::mojom::ConversionBasketRulesInfoPtr mojom_rules,
+    brave_ads::ExtractConversionBasketCallback callback) {
+  if (!bat_ads_client_associated_remote_.is_bound()) {
+    std::move(callback).Run(/*mojom_fields=*/nullptr);
+    return;
+  }
+
+  bat_ads_client_associated_remote_->ExtractConversionBasket(
+      tab_id, url, std::move(mojom_rules), std::move(callback));
+}
+
 void BatAdsClientMojoBridge::Load(const std::string& name,
                                   brave_ads::LoadCallback callback) {
   if (!bat_ads_client_associated_remote_.is_bound()) {

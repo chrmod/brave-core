@@ -140,9 +140,30 @@ struct AdHistoryItemInfo {
   ReactionType like_segment_reaction;
 };
 
+// Where to read one basket field on a conversion page: the first node matching
+// `selector`, its `attribute` if set, otherwise its text content.
+struct ConversionBasketFieldRuleInfo {
+  string selector;
+  string? attribute;
+};
+
+struct ConversionBasketRulesInfo {
+  ConversionBasketFieldRuleInfo? value;
+  ConversionBasketFieldRuleInfo? currency;
+};
+
+// Raw, unvalidated strings read from a conversion page.
+struct ConversionBasketFieldsInfo {
+  string? value;
+  string? currency;
+};
+
 struct CampaignConversionInfo {
   string? url_pattern;
   mojo_base.mojom.TimeDelta observation_window;
+  ConversionBasketRulesInfo? basket_rules;
+  // Fixed ISO 4217 currency code; takes precedence over `basket_rules`.
+  string? basket_currency;
 };
 
 enum NotificationAdEventType {
